@@ -17,15 +17,15 @@ limitations under the License.
 package volume
 
 import (
+	"fmt"
 	"github.com/golang/glog"
 	"github.com/kubernetes-incubator/external-storage/lib/controller"
+	"github.com/kubernetes-incubator/external-storage/lib/util"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/utils/exec"
-	"strconv"
 )
 
 const (
@@ -69,7 +69,38 @@ var _ controller.Provisioner = &flexProvisioner{}
 // Provision creates a volume i.e. the storage asset and returns a PV object for
 // the volume.
 func (p *flexProvisioner) Provision(options controller.VolumeOptions) (*v1.PersistentVolume, error) {
-	err := p.createVolume(options)
+
+	extraOptions := make(map[string]string)
+
+	// Get device size and convert to MB that starling defaults on
+	capacity := options.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
+	volSizeBytes := capacity.Value()
+	sz := int(util.RoundUpSize(volSizeBytes, 1024*1024))
+	if sz <= 0 {
+		err := fmt.Errorf("invalid storage '%s' requested for Starling provisioner, "+
+			"it must greater than zero", capacity.String())
+		return nil, err
+	}
+
+	szStr := fmt.Sprintf("%d", sz)
+	extraOptions[optionPVDeviceSz] = szStr
+	extraOptions[optionPVDeviceID] = "star-" + options.PVName
+
+	replicas, ok := options.PVC.Annotations[starRFAnnotation]
+	if ok {
+		extraOptions[optionPVRF] = replicas
+	} else {
+		extraOptions[optionPVRF] = "1"
+	}
+
+	isLocal, ok := options.PVC.Annotations[starIsLocalAnnotation]
+	if ok {
+		extraOptions[optionPVIsLocal] = isLocal
+	} else {
+		extraOptions[optionPVIsLocal] = "false"
+	}
+
+	err := p.createVolume(options, extraOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +128,7 @@ func (p *flexProvisioner) Provision(options controller.VolumeOptions) (*v1.Persi
 			PersistentVolumeSource: v1.PersistentVolumeSource{
 				FlexVolume: &v1.FlexPersistentVolumeSource{
 					Driver:   p.flexDriver,
-					Options:  map[string]string{},
+					Options:  extraOptions,
 					ReadOnly: false,
 				},
 			},
@@ -107,18 +138,8 @@ func (p *flexProvisioner) Provision(options controller.VolumeOptions) (*v1.Persi
 	return pv, nil
 }
 
-func (p *flexProvisioner) createVolume(volumeOptions controller.VolumeOptions) error {
-	extraOptions := map[string]string{}
-	extraOptions[optionPVorVolumeName] = volumeOptions.PVName
-
-	capacity := volumeOptions.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
-	requestBytes := capacity.Value()
-	requestMiB := int(util.RoundUpSize(requestBytes, 1024*1024))
-	requestGiB := int(util.RoundUpSize(requestBytes, 1024*1024*1024))
-	extraOptions["requestBytes"] = strconv.FormatInt(requestBytes, 10)
-	extraOptions["requestMiB"] = strconv.Itoa(requestMiB)
-	extraOptions["requestGiB"] = strconv.Itoa(requestGiB)
-
+func (p *flexProvisioner) createVolume(volumeOptions controller.VolumeOptions,
+	extraOptions map[string]string) error {
 	call := p.NewDriverCall(p.execCommand, provisionCmd)
 	call.AppendSpec(volumeOptions.Parameters, extraOptions)
 	output, err := call.Run()

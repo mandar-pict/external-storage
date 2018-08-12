@@ -31,6 +31,13 @@ const (
 	deleteCmd    = "delete"
 
 	optionPVorVolumeName = "kubernetes.io/pvOrVolumeName"
+	optionPVDeviceID     = "deviceID"
+	optionPVDeviceSz     = "deviceSZ"
+	optionPVRF           = "deviceRF"
+	optionPVIsLocal      = "deviceIsLocal"
+
+	starRFAnnotation      = "starling/replication-factor"
+	starIsLocalAnnotation = "starling/is-local-storage"
 )
 
 // ErrorTimeout defines the time error

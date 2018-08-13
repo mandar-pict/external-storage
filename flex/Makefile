@@ -13,7 +13,7 @@
 # limitations under the License.
 
 ifeq ($(REGISTRY),)
-	REGISTRY = quay.io/external_storage/
+	REGISTRY = mandar-dev3.gsintlab.com:5000/
 endif
 
 ifeq ($(VERSION),)

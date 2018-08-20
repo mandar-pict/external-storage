@@ -26,6 +26,7 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/utils/exec"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -66,18 +67,48 @@ type flexProvisioner struct {
 
 var _ controller.Provisioner = &flexProvisioner{}
 
+func getFlexVolumeOptions(volumeOptions controller.VolumeOptions) map[string]string {
+
+	extraOptions := make(map[string]string)
+	extraOptions[optionPVorVolumeName] = volumeOptions.PVC.Namespace + "-" +
+		volumeOptions.PVName
+
+	capacity := volumeOptions.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
+	requestBytes := capacity.Value()
+	requestMiB := int(util.RoundUpSize(requestBytes, 1024*1024))
+	requestGiB := int(util.RoundUpSize(requestBytes, 1024*1024*1024))
+	extraOptions["requestBytes"] = strconv.FormatInt(requestBytes, 10)
+	extraOptions["requestMiB"] = strconv.Itoa(requestMiB)
+	extraOptions["requestGiB"] = strconv.Itoa(requestGiB)
+	for resourceKey, resourceVal := range volumeOptions.PVC.Annotations {
+		// k8s.io and kubernetes.io are reserved domain names so can't use them
+		if strings.Contains(resourceKey, "k8s.io") ||
+			strings.Contains(resourceKey, "kubernetes.io") {
+			continue
+		}
+
+		extraOptions[resourceKey] = resourceVal
+	}
+
+	return extraOptions
+}
+
 // Provision creates a volume i.e. the storage asset and returns a PV object for
 // the volume.
 func (p *flexProvisioner) Provision(options controller.VolumeOptions) (*v1.PersistentVolume, error) {
-	err := p.createVolume(options)
+
+	// Get options for the flex volume
+	flexVolOptions := getFlexVolumeOptions(options)
+
+	err := p.createVolume(options, flexVolOptions)
 	if err != nil {
 		return nil, err
 	}
 
 	annotations := make(map[string]string)
 	annotations[annCreatedBy] = createdBy
-
 	annotations[annProvisionerID] = string(p.identity)
+
 	/*
 		The flex script for flexDriver=<vendor>/<driver> is in
 		/usr/libexec/kubernetes/kubelet-plugins/volume/exec/<vendor>~<driver>/<driver>
@@ -97,7 +128,7 @@ func (p *flexProvisioner) Provision(options controller.VolumeOptions) (*v1.Persi
 			PersistentVolumeSource: v1.PersistentVolumeSource{
 				FlexVolume: &v1.FlexPersistentVolumeSource{
 					Driver:   p.flexDriver,
-					Options:  map[string]string{},
+					Options:  flexVolOptions,
 					ReadOnly: false,
 				},
 			},
@@ -107,17 +138,8 @@ func (p *flexProvisioner) Provision(options controller.VolumeOptions) (*v1.Persi
 	return pv, nil
 }
 
-func (p *flexProvisioner) createVolume(volumeOptions controller.VolumeOptions) error {
-	extraOptions := map[string]string{}
-	extraOptions[optionPVorVolumeName] = volumeOptions.PVName
-
-	capacity := volumeOptions.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
-	requestBytes := capacity.Value()
-	requestMiB := int(util.RoundUpSize(requestBytes, 1024*1024))
-	requestGiB := int(util.RoundUpSize(requestBytes, 1024*1024*1024))
-	extraOptions["requestBytes"] = strconv.FormatInt(requestBytes, 10)
-	extraOptions["requestMiB"] = strconv.Itoa(requestMiB)
-	extraOptions["requestGiB"] = strconv.Itoa(requestGiB)
+func (p *flexProvisioner) createVolume(volumeOptions controller.VolumeOptions,
+	extraOptions map[string]string) error {
 
 	call := p.NewDriverCall(p.execCommand, provisionCmd)
 	call.AppendSpec(volumeOptions.Parameters, extraOptions)

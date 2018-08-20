@@ -40,7 +40,6 @@ var (
 )
 
 func main() {
-	flag.Set("logtostderr", "true")
 	flag.Parse()
 
 	if errs := validateProvisioner(*provisioner, field.NewPath("provisioner")); len(errs) != 0 {

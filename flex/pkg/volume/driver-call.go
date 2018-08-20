@@ -30,7 +30,9 @@ const (
 	provisionCmd = "provision"
 	deleteCmd    = "delete"
 
-	optionPVorVolumeName = "kubernetes.io/pvOrVolumeName"
+	// PV options are not allowed with domain name like k8s.io and
+	// kubernetes.io
+	optionPVorVolumeName = "pvOrVolumeName"
 )
 
 // ErrorTimeout defines the time error
